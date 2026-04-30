@@ -147,6 +147,9 @@ def modify_hessian(H: np.ndarray, delta: float = 1e-6, verbose: bool = False) ->
     # Ограничиваем значения
     H = np.clip(H, -1e10, 1e10)
 
+    # ✅ Симметризация (из-за численных погрешностей Гессиан может быть несимметричным)
+    H = 0.5 * (H + H.T)
+
     # Пробуем разложение Холецкого
     try:
         np.linalg.cholesky(H)

@@ -11,12 +11,13 @@ from datetime import datetime
 from typing import List, Optional, Dict
 
 from gui.plot_window import PlotWindow
+from methods.bfgs import BFGS
 from models.optimization_result import OptimizationResult
 from functions.test_functions import TestFunctions
 from methods.fletcher_reeves import FletcherReeves
 from methods.polak_ribiere import PolakRibiere
 from methods.newton import NewtonMethod
-from methods.bfgs import BFGS
+
 from methods.lbfgs import LBFGS
 
 
@@ -66,6 +67,7 @@ class OptimizationApp:
             "Растригин": "rastrigin",
             "Полином 10D": "polynomial_10d"
         }
+        self.polynomial_10d = None
         
         # Результаты оптимизации
         self.results: List[OptimizationResult] = []

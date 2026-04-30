@@ -1,12 +1,10 @@
 import numpy as np
-from typing import Callable, Optional
+from typing import Callable, Deque, List, Optional, Tuple
 from collections import deque
 
 from methods.optimizer_abstract import Optimizer
 from models.optimization_result import OptimizationResult
 from utils import line_search_wolfe
-
-
 
 
 class LBFGS(Optimizer):
@@ -24,7 +22,7 @@ class LBFGS(Optimizer):
                  verbose: bool = True):
         super().__init__(epsilon, max_iterations, verbose)
         self.m = m  # Размер истории
-        self._history: deque = deque(maxlen=m)  # Хранит (s, y, rho)
+        self._history: Deque[Tuple[np.ndarray, np.ndarray, float]] = deque(maxlen=m)
 
     def _two_loop_recursion(self, g: np.ndarray) -> np.ndarray:
         """
@@ -32,19 +30,21 @@ class LBFGS(Optimizer):
         
         Возвращает направление поиска d = -H @ g
         """
-        q = g.copy()
-        alpha_list = []
+        q = g.copy().astype(np.float64)
+        alpha_list: List[float] = []
 
         # Первый цикл (в обратном порядке)
         for s, y, rho in reversed(self._history):
-            alpha = rho * (s @ q)
+            alpha = rho * np.dot(s, q)
             alpha_list.append(alpha)
             q = q - alpha * y
 
         # Начальное приближение H_0 = gamma * I
         if len(self._history) > 0:
             s_last, y_last, _ = self._history[-1]
-            gamma = (s_last @ y_last) / (y_last @ y_last + 1e-16)
+            gamma = np.dot(s_last, y_last) / (np.dot(y_last, y_last) + 1e-16)
+            # ✅ Защита: gamma должна быть положительной
+            gamma = max(gamma, 1e-10)
         else:
             gamma = 1.0
 
@@ -52,7 +52,7 @@ class LBFGS(Optimizer):
 
         # Второй цикл (в прямом порядке)
         for (s, y, rho), alpha in zip(self._history, reversed(alpha_list)):
-            beta = rho * (y @ r)
+            beta = rho * np.dot(y, r)
             r = r + s * (alpha - beta)
 
         return -r  # Направление спуска
@@ -67,7 +67,7 @@ class LBFGS(Optimizer):
         n = len(x0)
         self._history.clear()  # Сброс истории
 
-        x = x0.copy()
+        x = x0.copy().astype(np.float64)
         history = {
             'k': [], 'x': [], 'f': [], 'grad_norm': [], 'alpha': [], 'd_norm': []
         }
@@ -77,7 +77,7 @@ class LBFGS(Optimizer):
         final_k = 0
 
         if self.verbose:
-            self._print_header()
+            self._print_header(n)
 
         for k in range(self.max_iterations):
             f_val = self._count_f(func, x)
@@ -110,23 +110,58 @@ class LBFGS(Optimizer):
             d = self._two_loop_recursion(g)
             d_norm = np.linalg.norm(d)
 
-            # Ограничение длины направления
+            # ✅ Проверка направления спуска
+            if np.dot(g, d) >= 0:
+                if self.verbose:
+                    print(f"⚠️ Направление L-BFGS не является направлением спуска на итерации {k}, переключаемся на антиградиент")
+                d = -g
+                # Сброс истории, так как текущее приближение плохое
+                self._history.clear()
+
+            # ✅ Нормировка направления
+            d_norm = np.linalg.norm(d)
+            if d_norm > 1e-16:
+                d_unit = d / d_norm
+            else:
+                d_unit = -g / (grad_norm + 1e-16)
+                d_norm = grad_norm
+
+            # ✅ Ограничение длины направления
             if d_norm > 1e10:
-                d = d / d_norm * 1e10
+                d_unit = d_unit  # уже нормирован
                 d_norm = 1e10
 
-            # 4. Линейный поиск
-            alpha = line_search_wolfe(func, grad, x, d, g)
-            if np.isnan(alpha) or np.isinf(alpha) or alpha < 1e-16:
-                alpha = 1e-10
+            # 4. Линейный поиск (c2=0.9 — стандарт для квазиньютоновских методов)
+            alpha = None
+            n_f_ls, n_g_ls = 0, 0
+            try:
+                alpha, n_f_ls, n_g_ls = line_search_wolfe(
+                    func, grad, x, d_unit, g,
+                    c2=0.9, max_iter=50,
+                    count_f=self._count_f,
+                    count_grad=self._count_grad
+                )
+            except Exception:
+                alpha = None
+
+            if alpha is None or np.isnan(alpha) or np.isinf(alpha) or alpha < 1e-16:
+                # ✅ Fallback: бэктрекинг Армихо
+                alpha = 1.0
+                slope = np.dot(g, d_unit)
+                for _ in range(20):
+                    if self._count_f(func, x + alpha * d_unit) <= f_val + 1e-4 * alpha * slope:
+                        break
+                    alpha *= 0.5
+                alpha = max(alpha, 1e-16)
+
             history['alpha'].append(alpha)
             history['d_norm'].append(d_norm)
 
             if self.verbose:
                 self._print_iteration(k, x, f_val, grad_norm, alpha)
 
-            # 5. Обновление точки
-            s = alpha * d
+            # 5. Обновление точки (используем нормированное направление!)
+            s = alpha * d_unit
             x_new = x + s
 
             # 6. Новый градиент
@@ -134,11 +169,11 @@ class LBFGS(Optimizer):
             y = g_new - g
 
             # 7. Обновление истории (только если кривизна положительна)
-            sy = s @ y
-            if sy > 1e-10:
+            sy = np.dot(s, y)
+            if sy > 1e-12:
                 rho = 1.0 / sy
                 self._history.append((s.copy(), y.copy(), rho))
-            elif self.verbose:
+            elif self.verbose and sy <= 0:
                 print(f"⚠️ Пропущено обновление L-BFGS: s·y = {sy:.2e} <= 0")
 
             x = x_new
@@ -152,7 +187,7 @@ class LBFGS(Optimizer):
         if self.verbose:
             self._print_footer(OptimizationResult(
                 x=x, f_val=float(f_val), grad_norm=float(grad_norm),
-                n_iterations=int(final_k + 1), n_function_evals=self.n_function_evals,
+                n_iterations=final_k + 1, n_function_evals=self.n_function_evals,
                 n_grad_evals=self.n_grad_evals, n_hess_evals=0,
                 history=history, converged=converged, method_name="L-BFGS"
             ))
@@ -161,7 +196,7 @@ class LBFGS(Optimizer):
             x=x,
             f_val=float(f_val),
             grad_norm=float(grad_norm),
-            n_iterations=int(final_k + 1),
+            n_iterations=final_k + 1,
             n_function_evals=int(self.n_function_evals),
             n_grad_evals=int(self.n_grad_evals),
             n_hess_evals=0,
