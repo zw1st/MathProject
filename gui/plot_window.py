@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from typing import List, Optional
 
+import numpy as np
+
 
 from functions.test_functions import TestFunction
 from models.optimization_result import OptimizationResult
@@ -19,13 +21,12 @@ class PlotWindow:
     Окно для просмотра графиков оптимизации.
     """
     
-    def __init__(self, parent: tk.Tk, func: TestFunction, results: List[OptimizationResult]):
-        """
-        Инициализация окна графиков.
-        """
+    def __init__(self, parent: tk.Tk, func: TestFunction, results: List[OptimizationResult],
+                slice_fixed_values: Optional[np.ndarray] = None):
         self.parent = parent
         self.func = func
         self.results = results
+        self.slice_fixed_values = slice_fixed_values
         
         # ✅ Проверка: есть ли данные для отображения
         if not results:
@@ -96,11 +97,12 @@ class PlotWindow:
                 if not self.func.is_2d:
                     plot_contour_with_tracks(
                         func=self.func,
-                        results=valid_results,  # ✅ Без deepcopy
+                        results=valid_results,
                         figure=fig,
                         ax=ax,
                         show=False,
                         slice_dims=(0, 1),
+                        slice_fixed_values=self.slice_fixed_values,
                         use_x0_for_slice=True
                     )
                 else:

@@ -8,7 +8,7 @@ from utils import modify_hessian, line_search_wolfe
 
 
 class NewtonMethod(Optimizer):
-    """Модифицированный метод Ньютона с регуляризацией Гессиана"""
+    """Метод Ньютона с регуляризацией Гессиана и квадратичной сходимостью"""
 
     def __init__(self,
                  epsilon: float = 0.001,
@@ -44,7 +44,7 @@ class NewtonMethod(Optimizer):
             g = self._count_grad(grad, x)
             grad_norm = np.linalg.norm(g)
 
-            # ✅ Проверка на расходимость
+            # Проверка на расходимость
             if np.isinf(f_val) or grad_norm > 1e15:
                 if self.verbose:
                     print(f"⚠️ Расходимость на итерации {k}: f={f_val}, ||grad||={grad_norm}")
@@ -73,7 +73,7 @@ class NewtonMethod(Optimizer):
             # 4. Модификация для положительной определённости
             H = modify_hessian(H, verbose=self.verbose)
 
-            # 5. Направление Ньютона
+            # 5. Направление Ньютона: d = -H^{-1} * g (полный шаг, без нормировки!)
             try:
                 d = np.linalg.solve(H, -g)
             except np.linalg.LinAlgError:
@@ -81,32 +81,44 @@ class NewtonMethod(Optimizer):
                     print(f"⚠️ LinAlgError на итерации {k}, используем антиградиент")
                 d = -g
 
-            # ✅ Проверка направления спуска: d должно быть направлением убывания
+            # 6. Проверка направления спуска
+            d_norm = np.linalg.norm(d)
+            if d_norm < 1e-16:
+                # Направление нулевое — мы в минимуме
+                converged = True
+                history['alpha'].append(0.0)
+                history['d_norm'].append(0.0)
+                final_k = k
+                if self.verbose:
+                    self._print_iteration(k, x, f_val, grad_norm, 0.0)
+                    print(f"✅ Сходимость достигнута на итерации {k}")
+                break
+
             if np.dot(g, d) >= 0:
+                # Направление не является направлением спуска — переключаемся на антиградиент
                 if self.verbose:
                     print(f"⚠️ Направление Ньютона не является направлением спуска на итерации {k}, переключаемся на антиградиент")
                 d = -g
+                d_norm = np.linalg.norm(d)
 
-            # ✅ Нормировка направления (стабилизация в оврагах)
-            d_norm = np.linalg.norm(d)
-            if d_norm > 1e-16:
-                d_unit = d / d_norm
-            else:
-                d_unit = -g / (grad_norm + 1e-16)
-                d_norm = grad_norm  # для истории
-
-            # ✅ Ограничение длины направления
+            # ✅ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: не нормируем направление!
+            # Ньютоновский шаг имеет оптимальную длину для квадратичных функций.
+            # Нормировка ломает квадратичную сходимость.
+            # Ограничиваем только аномально большие шаги.
             if d_norm > 1e10:
-                d_unit = d_unit  # уже нормирован
+                if self.verbose:
+                    print(f"⚠️ Шаг Ньютона слишком большой ({d_norm:.2e}), ограничиваем")
+                d = d / d_norm * 1e10
                 d_norm = 1e10
 
-            # 6. Линейный поиск (c2=0.9 — стандарт для Ньютона)
+            # 7. Линейный поиск с c2 близким к 1 — для сохранения полного ньютоновского шага
+            # На чистых квадратичных функциях alpha=1.0 удовлетворяет условиям Вольфе
             alpha = None
             n_f_ls, n_g_ls = 0, 0
             try:
                 alpha, n_f_ls, n_g_ls = line_search_wolfe(
-                    func, grad, x, d_unit, g,
-                    c2=0.9, max_iter=50,
+                    func, grad, x, d, g,
+                    c1=1e-4, c2=0.999, max_iter=50,  # c2 близко к 1
                     count_f=self._count_f,
                     count_grad=self._count_grad
                 )
@@ -114,14 +126,19 @@ class NewtonMethod(Optimizer):
                 alpha = None
 
             if alpha is None or np.isnan(alpha) or np.isinf(alpha) or alpha < 1e-16:
-                # ✅ Fallback: бэктрекинг Армихо
+                # Fallback: бэктрекинг Армихо с начальным шагом 1.0
                 alpha = 1.0
-                slope = np.dot(g, d_unit)
-                for _ in range(20):
-                    if self._count_f(func, x + alpha * d_unit) <= f_val + 1e-4 * alpha * slope:
-                        break
-                    alpha *= 0.5
-                alpha = max(alpha, 1e-16)
+                slope = np.dot(g, d)
+                if slope < 0:
+                    for _ in range(30):
+                        x_try = x + alpha * d
+                        f_try = self._count_f(func, x_try)
+                        if f_try <= f_val + 1e-4 * alpha * slope:
+                            break
+                        alpha *= 0.5
+                    alpha = max(alpha, 1e-16)
+                else:
+                    alpha = 1e-10
 
             history['alpha'].append(alpha)
             history['d_norm'].append(d_norm)
@@ -129,8 +146,8 @@ class NewtonMethod(Optimizer):
             if self.verbose:
                 self._print_iteration(k, x, f_val, grad_norm, alpha)
 
-            # 7. Обновление точки
-            x = x + alpha * d_unit
+            # 8. Обновление точки — полный ньютоновский шаг (без нормировки)
+            x = x + alpha * d
             final_k = k
 
         # Финальная точка

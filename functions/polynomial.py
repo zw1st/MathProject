@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Callable
 import os
 
-from functions.test_functions import TestFunction
+
 
 # ✅ Отключаем предварительное выделение памяти JAX (важно для совместимости с GUI)
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
@@ -214,8 +214,8 @@ class Polynomial10D:
         """Минимальное значение (если известно)"""
         return 0.0
     
-    def to_test_function(self) -> TestFunction:
-        """Преобразовать в TestFunction для оптимизаторов"""
+    def to_test_function(self):
+        from functions.test_functions import TestFunction  # Локальный импорт
         
         return TestFunction(
             name=self.name,

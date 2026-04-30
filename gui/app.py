@@ -498,6 +498,7 @@ class OptimizationApp:
         for result in self.results:
             x1 = result.x[0] if len(result.x) > 0 else 0.0
             x2 = result.x[1] if len(result.x) > 1 else 0.0
+
             
             values = (
                 result.method_name,
@@ -515,17 +516,23 @@ class OptimizationApp:
     # ========== ГРАФИКИ ==========
     
     def _show_plots(self):
-        """Открытие окна с графиками"""
         if not self.results or not self.current_func:
             messagebox.showwarning("Предупреждение", "Сначала запустите оптимизацию!")
             return
         
-        # Закрытие предыдущего окна графиков
         if self.plot_window and self.plot_window.window.winfo_exists():
             self.plot_window.window.destroy()
         
-        # Создание нового окна
-        self.plot_window = PlotWindow(self.root, self.current_func, self.results)
+        # Для многомерных функций передаём начальную точку для среза
+        slice_fixed = None
+        if not self.current_func.is_2d and len(self.results) > 0:
+            hist = self.results[0].history.get('x', [])
+            slice_fixed = np.array(hist[0]) if len(hist) > 0 else None
+        
+        self.plot_window = PlotWindow(
+            self.root, self.current_func, self.results,
+            slice_fixed_values=slice_fixed
+        )
     
     # ========== ЭКСПОРТ ==========
     

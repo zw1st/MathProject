@@ -138,7 +138,7 @@ def modify_hessian(H: np.ndarray, delta: float = 1e-6, verbose: bool = False) ->
     """
     n = H.shape[0]
 
-    # ✅ Проверка на NaN/Inf
+    # Проверка на NaN/Inf
     if np.any(np.isnan(H)) or np.any(np.isinf(H)):
         if verbose:
             print("⚠️ Гессиан содержит NaN/Inf, возвращаем единичную матрицу")
@@ -147,7 +147,6 @@ def modify_hessian(H: np.ndarray, delta: float = 1e-6, verbose: bool = False) ->
     # Ограничиваем значения
     H = np.clip(H, -1e10, 1e10)
 
-    # ✅ Симметризация (из-за численных погрешностей Гессиан может быть несимметричным)
     H = 0.5 * (H + H.T)
 
     # Пробуем разложение Холецкого

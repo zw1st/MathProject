@@ -3,6 +3,8 @@ import numpy as np
 from typing import Callable, List, Tuple, Optional
 from dataclasses import dataclass
 
+from functions.polynomial import Polynomial10D
+
 
 @dataclass
 class TestFunction:
@@ -345,7 +347,9 @@ class TestFunctions:
             'matyas': cls.matyas,
             'three_hump_camel': cls.three_hump_camel,
             'sphere': cls.sphere,
-            'rastrigin': cls.rastrigin
+            'rastrigin': cls.rastrigin,
+            "polynomial_10d": cls.polynomial_10d
+
         }
         return functions[name.lower()]()
     
@@ -381,3 +385,9 @@ class TestFunctions:
             bounds=(np.full(n, -5.0), np.full(n, 10.0)),
             is_2d=False
         )
+
+    @staticmethod
+    def polynomial_10d() -> TestFunction:
+        """Полином 10-й степени из JSON конфигурации"""
+        poly = Polynomial10D("config/polynomial.json")
+        return poly.to_test_function()
